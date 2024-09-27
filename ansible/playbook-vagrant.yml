@@ -8,3 +8,6 @@
 
 - name: 'Run playbook-nginx.yml'
   ansible.builtin.import_playbook: playbook-nginx.yml
+
+- name: 'Run playbook-kubecost_installation.yml'
+  ansible.builtin.import_playbook: playbook-kubecost_installation.yml
