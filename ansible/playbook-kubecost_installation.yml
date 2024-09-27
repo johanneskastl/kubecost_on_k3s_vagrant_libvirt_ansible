@@ -1,0 +1,80 @@
+---
+
+- name: 'Install Kubecost'
+  hosts: 'k3s1'
+  gather_facts: true
+  become: false
+  module_defaults:
+    kubernetes.core.helm:
+      kubeconfig: './k3s-kubeconfig'
+    kubernetes.core.k8s:
+      kubeconfig: './k3s-kubeconfig'
+    kubernetes.core.k8s_info:
+      kubeconfig: './k3s-kubeconfig'
+
+  tasks:
+
+    - name: 'Create the kubecost namespace'
+      delegate_to: 'localhost'
+      kubernetes.core.k8s:
+        name: 'kubecost'
+        api_version: 'v1'
+        kind: 'Namespace'
+        state: 'present'
+
+    - name: 'Install kubecost via the helm chart'
+      delegate_to: 'localhost'
+      kubernetes.core.helm:
+        chart_repo_url: 'https://kubecost.github.io/cost-analyzer/'
+        chart_ref: 'cost-analyzer'
+        release_name: 'kubecost'
+        release_namespace: 'kubecost'
+        release_values:
+          ingress:
+            enabled: true
+            hosts:
+              - "kubecost.{{ hostvars['k3s1']['ansible_default_ipv4']['address'] }}.sslip.io"
+          kubecostProductConfigs:
+            customPricesEnabled: true
+            defaultModelPricing:
+              enabled: true
+              # one CPU costs 100$ per month
+              CPU: "100.0"
+              spotCPU: "0"
+              RAM: "0"
+              spotRAM: "0"
+              GPU: "0"
+              spotGPU: "0"
+              storage: "0"
+              zoneNetworkEgress: "0"
+              regionNetworkEgress: "0"
+              internetNetworkEgress: "0"
+
+    - name: 'Wait until all pods are running'
+      delegate_to: 'localhost'
+      kubernetes.core.k8s_info:
+        api_version: v1
+        kind: Pod
+        namespace: kubecost
+      register: pod_list
+      until: |
+        pod_list | json_query("resources[*].status.phase") | unique | sort == ["Running"]
+        or
+        pod_list | json_query("resources[*].status.phase") | unique | sort == ["Running", "Succeeded"]
+      retries: 36
+      delay: 10
+
+    - name: 'Wait for the kubecost URL to be available'
+      delegate_to: 'localhost'
+      ansible.builtin.uri:
+        url: "http://kubecost.{{ hostvars['k3s1']['ansible_default_ipv4']['address'] }}.sslip.io"
+        validate_certs: false
+      register: result
+      until: "result.status == 200"
+      retries: 31
+      delay: 10
+
+    - name: 'Output kubecost URL'
+      delegate_to: 'localhost'
+      ansible.builtin.debug:
+        msg: "The kubecost UI is reachable at http://kubecost.{{ hostvars['k3s1']['ansible_default_ipv4']['address'] }}.sslip.io"
